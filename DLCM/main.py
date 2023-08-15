@@ -62,9 +62,8 @@ def create_model(session, data_set, forward_only):
 					 expand_embed_size, FLAGS.batch_size, FLAGS.hparams,
 					 forward_only, FLAGS.feed_previous)
 
-	ckpt = tf.train.get_checkpoint_state(FLAGS.train_dir)
-	if ckpt:
-		print("Reading model parameters from %s" % ckpt.model_checkpoint_path)
+	if ckpt := tf.train.get_checkpoint_state(FLAGS.train_dir):
+		print(f"Reading model parameters from {ckpt.model_checkpoint_path}")
 		model.saver.restore(session, ckpt.model_checkpoint_path)
 	else:
 		print("Created model with fresh parameters.")
@@ -74,8 +73,8 @@ def create_model(session, data_set, forward_only):
 
 def train():
 	# Prepare data.
-	print("Reading data in %s" % FLAGS.data_dir)
-	
+	print(f"Reading data in {FLAGS.data_dir}")
+
 	train_set = data_utils.read_data(FLAGS.data_dir, 'train')
 	if FLAGS.boost_training_data:
 		print('Boosting training data')
@@ -92,9 +91,10 @@ def train():
 		print("Created %d layers of %d units." % (model.hparams.num_layers, FLAGS.embed_size))
 
 		# Create tensorboard summarizations.
-		train_writer = tf.summary.FileWriter(FLAGS.train_dir + '/train_log',
-										sess.graph)
-		valid_writer = tf.summary.FileWriter(FLAGS.train_dir + '/valid_log')
+		train_writer = tf.summary.FileWriter(
+			f'{FLAGS.train_dir}/train_log', sess.graph
+		)
+		valid_writer = tf.summary.FileWriter(f'{FLAGS.train_dir}/valid_log')
 
 		#pad data
 		train_set.pad(train_set.rank_list_size, model.hparams.reverse_input)
@@ -125,7 +125,7 @@ def train():
 
 				print(model.start_index)
 				train_writer.add_summary(summary, current_step)
-				
+
 				# Print statistics for the previous epoch.
 				perplexity = math.exp(loss) if loss < 300 else float('inf')
 				print ("global step %d learning rate %.4f step-time %.2f perplexity "
@@ -136,7 +136,7 @@ def train():
 				if len(previous_losses) > 2 and loss > max(previous_losses[-3:]):
 					sess.run(model.learning_rate_decay_op)
 				previous_losses.append(loss)
-				
+
 				if perplexity == float('inf'):
 					break
 
@@ -159,13 +159,13 @@ def train():
 				print("  eval: perplexity %.2f" % (eval_ppx))
 
 				# Save checkpoint and zero timer and loss.
-				if best_perplexity == None or best_perplexity >= eval_ppx:
+				if best_perplexity is None or best_perplexity >= eval_ppx:
 					best_perplexity = eval_ppx
 					checkpoint_path = os.path.join(FLAGS.train_dir, "RankLSTM.ckpt")
 					model.saver.save(sess, checkpoint_path, global_step=model.global_step)
-				
+
 				output_label = results[0][0]
-				
+
 				original_input = [encoder_inputs[l][0] for l in xrange(model.rank_list_size)]
 				print('ENCODE INPUTS')
 				print(original_input)
@@ -192,7 +192,7 @@ def decode():
 	config.gpu_options.allow_growth = True
 	with tf.Session(config=config) as sess:
 		# Load test data.
-		print("Reading data in %s" % FLAGS.data_dir)
+		print(f"Reading data in {FLAGS.data_dir}")
 		test_set = None
 		if FLAGS.decode_train:
 			test_set = data_utils.read_data(FLAGS.data_dir,'train')

@@ -20,7 +20,7 @@ import os
 
 class Raw_data:
 	def __init__(self, data_path = None, file_prefix = None):
-		if data_path == None:
+		if data_path is None:
 			self.embed_size = -1
 			self.rank_list_size = -1
 			self.features = []
@@ -31,43 +31,38 @@ class Raw_data:
 			self.gold_weights = []
 			return
 
-		settings = json.load(open(data_path + 'settings.json'))
+		settings = json.load(open(f'{data_path}settings.json'))
 		self.embed_size = settings['embed_size']
 		self.rank_list_size = settings['rank_cutoff']
 
 		self.features = []
 		self.dids = []
-		feature_fin = open(data_path + file_prefix + '/' + file_prefix + '.feature')
-		for line in feature_fin:
-			arr = line.strip().split(' ')
-			self.dids.append(arr[0])
-			self.features.append([0.0 for _ in xrange(self.embed_size)])
-			for x in arr[1:]:
-				arr2 = x.split(':')
-				self.features[-1][int(arr2[0])] = float(arr2[1])
-		feature_fin.close()
-
+		with open(data_path + file_prefix + '/' + file_prefix + '.feature') as feature_fin:
+			for line in feature_fin:
+				arr = line.strip().split(' ')
+				self.dids.append(arr[0])
+				self.features.append([0.0 for _ in xrange(self.embed_size)])
+				for x in arr[1:]:
+					arr2 = x.split(':')
+					self.features[-1][int(arr2[0])] = float(arr2[1])
 		self.initial_list = []
 		self.qids = []
-		init_list_fin = open(data_path + file_prefix + '/' + file_prefix + '.init_list')
-		for line in init_list_fin:
-			arr = line.strip().split(' ')
-			self.qids.append(arr[0])
-			self.initial_list.append([int(x) for x in arr[1:]])
-		init_list_fin.close()
-
+		with open(data_path + file_prefix + '/' + file_prefix + '.init_list') as init_list_fin:
+			for line in init_list_fin:
+				arr = line.strip().split(' ')
+				self.qids.append(arr[0])
+				self.initial_list.append([int(x) for x in arr[1:]])
 		self.gold_list = []
-		gold_list_fin = open(data_path + file_prefix + '/' + file_prefix + '.gold_list')
-		for line in gold_list_fin:
-			self.gold_list.append([int(x) for x in line.strip().split(' ')[1:]])
-		gold_list_fin.close()
-
+		with open(data_path + file_prefix + '/' + file_prefix + '.gold_list') as gold_list_fin:
+			self.gold_list.extend(
+				[int(x) for x in line.strip().split(' ')[1:]] for line in gold_list_fin
+			)
 		self.gold_weights = []
-		gold_weight_fin = open(data_path + file_prefix + '/' + file_prefix + '.weights')
-		for line in gold_weight_fin:
-			self.gold_weights.append([float(x) for x in line.strip().split(' ')[1:]])
-		gold_weight_fin.close()
-
+		with open(data_path + file_prefix + '/' + file_prefix + '.weights') as gold_weight_fin:
+			self.gold_weights.extend(
+				[float(x) for x in line.strip().split(' ')[1:]]
+				for line in gold_weight_fin
+			)
 		self.initial_scores = []
 		#if os.path.isfile(data_path + file_prefix + '/' + file_prefix + '.intial_scores'):
 		with open(data_path + file_prefix + '/' + file_prefix + '.initial_scores') as fin:
@@ -97,7 +92,7 @@ class Raw_data:
 			#swap for swap_number times
 			for _ in xrange(max_boosted_num):
 				list_change = False
-				for j in xrange(swap_number):
+				for _ in xrange(swap_number):
 					_1 = int(random.random()*(list_length))
 					_2 = int(random.random()*(list_length))
 					if new_gold_list[_1] == new_gold_list[_2]:
@@ -118,8 +113,7 @@ class Raw_data:
 
 
 def read_data(data_path, file_prefix):
-	data = Raw_data(data_path, file_prefix)
-	return data
+	return Raw_data(data_path, file_prefix)
 
 def generate_ranklist(data, rerank_lists, reverse_input):
 	if len(rerank_lists) != len(data.initial_list):
@@ -138,25 +132,25 @@ def generate_ranklist(data, rerank_lists, reverse_input):
 			if idx not in index_set:
 				index_set.add(idx)
 				index_list.append(idx)
-		for idx in xrange(len(rerank_lists[i])):
-			if idx not in index_set:
-				index_list.append(idx)
+		index_list.extend(
+			idx for idx in xrange(len(rerank_lists[i])) if idx not in index_set
+		)
 		#get new ranking list
 		qid = data.qids[i]
-		did_list = []
 		new_list = [data.initial_list[i][idx] for idx in index_list]
-		for ni in new_list:
-			if ni >= 0:
-				did_list.append(data.dids[ni])
+		did_list = [data.dids[ni] for ni in new_list if ni >= 0]
 		qid_list_map[qid] = did_list
 	return qid_list_map
 
 def output_ranklist(data, rerank_lists, output_path, reverse_input, file_name = 'test'):
 	qid_list_map = generate_ranklist(data, rerank_lists, reverse_input)
-	fout = open(output_path + file_name + '.ranklist','w')
-	for qid in data.qids:
-		for i in xrange(len(qid_list_map[qid])):
-			fout.write(qid + ' Q0 ' + qid_list_map[qid][i] + ' ' + str(i+1)
-							+ ' ' + str(0-i) + ' RankLSTM\n')
-	fout.close()
+	with open(output_path + file_name + '.ranklist','w') as fout:
+		for qid in data.qids:
+			for i in xrange(len(qid_list_map[qid])):
+				fout.write(
+					(
+						f'{qid} Q0 {qid_list_map[qid][i]} {str(i + 1)} {str(0 - i)}'
+						+ ' RankLSTM\n'
+					)
+				)
 

@@ -70,17 +70,17 @@ class RankLSTM(object):
 		self.count = 1
 		self.rank_list_size = rank_list_size
 		self.embed_size = embed_size
-		self.expand_embed_size = expand_embed_size if expand_embed_size > 0 else 0
+		self.expand_embed_size = max(expand_embed_size, 0)
 		self.batch_size = batch_size
 		self.learning_rate = tf.Variable(float(self.hparams.learning_rate), trainable=False)
 		self.learning_rate_decay_op = self.learning_rate.assign(
 			self.learning_rate * self.hparams.learning_rate_decay_factor)
 		self.global_step = tf.Variable(0, trainable=False)
-		
+
 
 		# If we use sampled softmax, we need an output projection.
 		output_projection = None
-		
+
 		# Feeds for inputs.
 		self.encoder_inputs = []
 		self.decoder_inputs = []
@@ -88,9 +88,10 @@ class RankLSTM(object):
 		self.target_labels = []
 		self.target_weights = []
 		self.target_initial_score = []
-		for i in xrange(self.rank_list_size):
-			self.encoder_inputs.append(tf.placeholder(tf.int64, shape=[None],
-											name="encoder{0}".format(i)))
+		self.encoder_inputs.extend(
+			tf.placeholder(tf.int64, shape=[None], name="encoder{0}".format(i))
+			for i in xrange(self.rank_list_size)
+		)
 		for i in xrange(self.rank_list_size):
 			self.target_labels.append(tf.placeholder(tf.int64, shape=[None],
 										name="targets{0}".format(i)))
@@ -124,7 +125,7 @@ class RankLSTM(object):
 			self.outputs[0] = self.outputs[0] + tf.stack(self.target_initial_score, axis=1)
 
 		# Training outputs and losses.
-		print('Loss Function is ' + self.hparams.loss_func)
+		print(f'Loss Function is {self.hparams.loss_func}')
 		self.loss = None
 		if self.hparams.loss_func == 'attrank':
 			self.loss = self.attrank_loss(self.outputs[0], self.target_labels, self.target_weights)
@@ -173,10 +174,18 @@ class RankLSTM(object):
 							 " %d != %d." % (len(target_weights), self.rank_list_size))
 
 		# Input feed: encoder inputs, decoder inputs, target_weights, as provided.
-		input_feed = {}
-		input_feed[self.batch_index_bias.name] = np.array([i * self.rank_list_size for i in xrange(self.batch_size)])
+		input_feed = {
+			self.batch_index_bias.name: np.array(
+				[i * self.rank_list_size for i in xrange(self.batch_size)]
+			)
+		}
 		input_feed[self.batch_expansion_mat.name] = np.ones((self.batch_size,1))
-		input_feed[self.batch_diag.name] = np.array([np.diag([0.5 for x in xrange(self.rank_list_size)]) for _ in xrange(self.batch_size)])
+		input_feed[self.batch_diag.name] = np.array(
+			[
+				np.diag([0.5 for _ in xrange(self.rank_list_size)])
+				for _ in xrange(self.batch_size)
+			]
+		)
 		input_feed[self.embeddings.name] = np.array(embeddings)
 		for l in xrange(self.rank_list_size):
 			input_feed[self.encoder_inputs[l].name] = encoder_inputs[l]
@@ -250,10 +259,7 @@ class RankLSTM(object):
 			#decoder_weights.append([-1 if input_seq[i][x] < 0 else output_weights[i][x] for x in xrange(len(input_seq[i]))])
 			decoder_weights.append(decoder_weight)
 			decoder_initial_scores.append(decoder_initial_score)
-			count = 0
-			for x in encoder_inputs[-1]:
-				if x < 0:
-					count += 1
+			count = sum(1 for x in encoder_inputs[-1] if x < 0)
 			for j in xrange(len(decoder_targets[-1])):
 				index = count + decoder_targets[-1][j]
 				if index < self.rank_list_size:
@@ -283,7 +289,7 @@ class RankLSTM(object):
 			self.prepare_data_with_index(input_seq, output_seq, output_weights, output_initial_score, features, i,
 								encoder_inputs, decoder_targets, embeddings, decoder_weights, decoder_initial_scores)
 
-			if cache == None:
+			if cache is None:
 				cache = [input_seq[i], decoder_weights[-1]]
 
 		#self.start_index += self.batch_size
@@ -295,15 +301,19 @@ class RankLSTM(object):
 					encoder_inputs[i][j] = embedings_length
 
 
-		batch_encoder_inputs = []
 		batch_weights = []
 		batch_targets = []
 		batch_initial_scores = []
-		# Batch encoder inputs are just re-indexed encoder_inputs.
-		for length_idx in xrange(self.rank_list_size):
-			batch_encoder_inputs.append(
-				np.array([encoder_inputs[batch_idx][length_idx]
-					for batch_idx in xrange(self.batch_size)], dtype=np.float32))
+		batch_encoder_inputs = [
+			np.array(
+				[
+					encoder_inputs[batch_idx][length_idx]
+					for batch_idx in xrange(self.batch_size)
+				],
+				dtype=np.float32,
+			)
+			for length_idx in xrange(self.rank_list_size)
+		]
 		# Batch decoder inputs are re-indexed decoder_inputs, we create weights.
 		for length_idx in xrange(self.rank_list_size):
 			batch_targets.append(
@@ -339,12 +349,12 @@ class RankLSTM(object):
 			self.prepare_data_with_index(input_seq, output_seq, output_weights, output_initial_score, features, i,
 								encoder_inputs, decoder_targets, embeddings, decoder_weights, decoder_initial_scores)
 
-			if cache == None:
+			if cache is None:
 				cache = [input_seq[i], decoder_weights[-1]]
 
-			#if self.hparams.loss_func == 'softRank':
-			#	for x in xrange(len(decoder_weights[-1])):
-			#		decoder_weights[-1][x] = 0 if decoder_weights[-1][x] < 0 else decoder_weights[-1][x]
+				#if self.hparams.loss_func == 'softRank':
+				#	for x in xrange(len(decoder_weights[-1])):
+				#		decoder_weights[-1][x] = 0 if decoder_weights[-1][x] < 0 else decoder_weights[-1][x]
 
 		#self.start_index += self.batch_size
 
@@ -355,15 +365,19 @@ class RankLSTM(object):
 					encoder_inputs[i][j] = embedings_length
 
 
-		batch_encoder_inputs = []
 		batch_weights = []
 		batch_initial_scores = []
 		batch_targets = []
-		# Batch encoder inputs are just re-indexed encoder_inputs.
-		for length_idx in xrange(self.rank_list_size):
-			batch_encoder_inputs.append(
-				np.array([encoder_inputs[batch_idx][length_idx]
-					for batch_idx in xrange(self.batch_size)], dtype=np.float32))
+		batch_encoder_inputs = [
+			np.array(
+				[
+					encoder_inputs[batch_idx][length_idx]
+					for batch_idx in xrange(self.batch_size)
+				],
+				dtype=np.float32,
+			)
+			for length_idx in xrange(self.rank_list_size)
+		]
 		# Batch decoder inputs are re-indexed decoder_inputs, we create weights.
 		for length_idx in xrange(self.rank_list_size):
 			batch_targets.append(
@@ -380,7 +394,7 @@ class RankLSTM(object):
 		return batch_encoder_inputs, embeddings, batch_targets, batch_weights, batch_initial_scores, cache
 
 
-	def get_data_by_index(self, input_seq, output_seq, output_weights, output_initial_score, features, index): #not fixed
+	def get_data_by_index(self, input_seq, output_seq, output_weights, output_initial_score, features, index):	#not fixed
 		"""Get one data from the specified index, prepare for step.
 
 		"""
@@ -402,15 +416,19 @@ class RankLSTM(object):
 				if encoder_inputs[i][j] < 0:
 					encoder_inputs[i][j] = embedings_length
 
-		batch_encoder_inputs = []
 		batch_weights = []
 		batch_initial_scores = []
 		batch_targets = []
-		# Batch encoder inputs are just re-indexed encoder_inputs.
-		for length_idx in xrange(self.rank_list_size):
-			batch_encoder_inputs.append(
-				np.array([encoder_inputs[batch_idx][length_idx]
-						for batch_idx in xrange(self.batch_size)], dtype=np.float32))
+		batch_encoder_inputs = [
+			np.array(
+				[
+					encoder_inputs[batch_idx][length_idx]
+					for batch_idx in xrange(self.batch_size)
+				],
+				dtype=np.float32,
+			)
+			for length_idx in xrange(self.rank_list_size)
+		]
 		for length_idx in xrange(self.rank_list_size):
 			batch_targets.append(
 				np.array([decoder_targets[batch_idx][length_idx]
@@ -733,9 +751,6 @@ class RankLSTM(object):
 							loss += target_rels[i][j2] - target_rels[i][j1]
 		return loss
 
-		
-		return math_ops.reduce_sum(loss) / math_ops.cast(batch_size, dtypes.float32)
-
 	def listMLE(self, output, target_indexs, target_rels, name=None):
 		loss = None
 		with ops.name_scope(name, "listMLE",[output] + target_indexs + target_rels):
@@ -777,8 +792,14 @@ class RankLSTM(object):
 			for i in xrange(self.rank_list_size):
 				pi[i] = tf.unstack(pi[i], None, 1)
 			#compute rank distribution p_j_r
-			one_zeros = tf.matmul(self.batch_expansion_mat, 
-						tf.constant([1.0]+[0.0 for r in xrange(self.rank_list_size-1)], tf.float32, [1,self.rank_list_size]))
+			one_zeros = tf.matmul(
+				self.batch_expansion_mat,
+				tf.constant(
+					[1.0] + [0.0 for _ in xrange(self.rank_list_size - 1)],
+					tf.float32,
+					[1, self.rank_list_size],
+				),
+			)
 			#initial_value = tf.unpack(one_zeros, None, 1)
 			pr = [one_zeros for _ in xrange(self.rank_list_size)] #[i][r][None]
 			#debug_pr_1 = [one_zeros for _ in xrange(self.rank_list_size)] #[i][r][None]
@@ -827,8 +848,7 @@ class RankLSTM(object):
 	def integral_Guaussian(self, mu, theta):
 		a = -4.0/math.sqrt(2.0*math.pi)/theta
 		exp_mu = tf.exp(a * mu)
-		ig = tf.div(exp_mu, exp_mu + 1) * -1.0 + 1
-		return ig
+		return tf.div(exp_mu, exp_mu + 1) * -1.0 + 1
 
 	def clip_by_each_value(self, t_list, clip_max_value = None, clip_min_value = None, name=None):
 		if (not isinstance(t_list, collections.Sequence)
